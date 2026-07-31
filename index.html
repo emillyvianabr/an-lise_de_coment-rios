@@ -300,6 +300,22 @@
 
     <section class="panel score-panel">
       <div class="panel-head">
+        <div>
+          <h2>NPS estimado por estrelas — evolução mensal</h2>
+          <p class="note" style="margin:4px 0 0">
+            Regra: 5 estrelas = Promotor · 4 estrelas = Neutro · 1 a 3 estrelas = Detrator.
+          </p>
+        </div>
+        <div class="legend" id="npsLegend"></div>
+      </div>
+      <div class="chart-wrap">
+        <svg id="npsChart" viewBox="0 0 1000 420" role="img" aria-label="Gráfico mensal de NPS estimado por estrelas"></svg>
+      </div>
+      <p class="note">Indicador estimado a partir das estrelas; não corresponde ao NPS oficial coletado em escala de 0 a 10.</p>
+    </section>
+
+    <section class="panel score-panel">
+      <div class="panel-head">
         <h2>Distribuição das pontuações</h2>
         <div class="legend" id="scoreLegend"></div>
       </div>
@@ -324,6 +340,8 @@
     const selectedSourceLabel = document.getElementById("selectedSourceLabel");
     const legend = document.getElementById("legend");
     const scoreChart = document.getElementById("scoreChart");
+    const npsChart = document.getElementById("npsChart");
+    const npsLegend = document.getElementById("npsLegend");
     const averageChart = document.getElementById("averageChart");
     const averageLegend = document.getElementById("averageLegend");
     const scoreLegend = document.getElementById("scoreLegend");
@@ -681,6 +699,210 @@
       });
     }
 
+    function classifyNpsByStars(score) {
+      const value = Number(score);
+      if (value === 5) return "Promotor";
+      if (value === 4) return "Neutro";
+      if (value >= 1 && value <= 3) return "Detrator";
+      return null;
+    }
+
+    function aggregateMonthlyNps(items, attraction, months) {
+      const buckets = Object.fromEntries(
+        months.map(month => [
+          month,
+          { total: 0, promoters: 0, detractors: 0 }
+        ])
+      );
+
+      items
+        .filter(item => item.atracao === attraction)
+        .forEach(item => {
+          const date = item.dataReferencia || item.dataVisitacao || item.dataPublicacao;
+          const key = monthKey(date);
+          const classification = classifyNpsByStars(item.pontuacao);
+
+          if (!key || !classification || !buckets[key]) return;
+
+          buckets[key].total += 1;
+          if (classification === "Promotor") buckets[key].promoters += 1;
+          if (classification === "Detrator") buckets[key].detractors += 1;
+        });
+
+      return months.map(month => {
+        const bucket = buckets[month];
+        if (!bucket.total) return null;
+
+        const promoterRate = bucket.promoters / bucket.total;
+        const detractorRate = bucket.detractors / bucket.total;
+
+        return Math.round((promoterRate - detractorRate) * 100);
+      });
+    }
+
+    function drawNpsLine(values, months, lineClass, pointClass, attractionName, width, height, margins) {
+      const validPoints = values
+        .map((value, index) => ({ value, index }))
+        .filter(point => point.value !== null);
+
+      if (!validPoints.length) return;
+
+      const plotW = width - margins.left - margins.right;
+      const plotH = height - margins.top - margins.bottom;
+      const x = index =>
+        margins.left +
+        (months.length === 1 ? plotW / 2 : (index / (months.length - 1)) * plotW);
+      const y = value =>
+        margins.top + ((100 - value) / 200) * plotH;
+
+      let currentSegment = [];
+
+      const appendSegment = segment => {
+        if (!segment.length) return;
+        if (segment.length === 1) {
+          currentSegment = [];
+          return;
+        }
+
+        const points = segment
+          .map(point => `${x(point.index)},${y(point.value)}`)
+          .join(" ");
+
+        npsChart.appendChild(svgEl("polyline", {
+          points,
+          class: lineClass
+        }));
+        currentSegment = [];
+      };
+
+      values.forEach((value, index) => {
+        if (value === null) {
+          appendSegment(currentSegment);
+          currentSegment = [];
+          return;
+        }
+
+        currentSegment.push({ value, index });
+      });
+      appendSegment(currentSegment);
+
+      validPoints.forEach(point => {
+        const circle = svgEl("circle", {
+          cx: x(point.index),
+          cy: y(point.value),
+          r: 4,
+          class: pointClass
+        });
+
+        attachTooltip(
+          circle,
+          attractionName,
+          [
+            monthLabel(months[point.index]),
+            `NPS estimado: ${point.value}`,
+          ]
+        );
+
+        npsChart.appendChild(circle);
+      });
+    }
+
+    function renderMonthlyNpsChart(items, selectedAttraction, selectedYears) {
+      npsChart.innerHTML = "";
+      npsLegend.innerHTML = "";
+
+      const months = getMonthRange(selectedYears);
+
+      if (selectedAttraction === "Ambos" || selectedAttraction === "Cristo") {
+        npsLegend.innerHTML += '<span class="legend-item"><i class="dot" style="background:var(--cristo)"></i>Cristo Redentor</span>';
+      }
+      if (selectedAttraction === "Ambos" || selectedAttraction === "Bondinho") {
+        npsLegend.innerHTML += '<span class="legend-item"><i class="dot" style="background:var(--bondinho)"></i>Bondinho</span>';
+      }
+
+      if (!months.length) {
+        npsChart.appendChild(
+          svgEl("text", {
+            x: 500,
+            y: 210,
+            "text-anchor": "middle",
+            class: "axis-label"
+          }, "Sem dados para o filtro selecionado")
+        );
+        return;
+      }
+
+      const width = 1000;
+      const height = 420;
+      const margins = { top: 24, right: 30, bottom: 70, left: 65 };
+      const plotW = width - margins.left - margins.right;
+      const plotH = height - margins.top - margins.bottom;
+
+      [-100, -50, 0, 50, 100].forEach(value => {
+        const yy = margins.top + ((100 - value) / 200) * plotH;
+
+        npsChart.appendChild(svgEl("line", {
+          x1: margins.left,
+          y1: yy,
+          x2: width - margins.right,
+          y2: yy,
+          class: value === 0 ? "grid-line" : "grid-line"
+        }));
+
+        npsChart.appendChild(svgEl("text", {
+          x: margins.left - 12,
+          y: yy + 4,
+          "text-anchor": "end",
+          class: "axis-label"
+        }, String(value)));
+      });
+
+      const labelEvery = Math.max(1, Math.ceil(months.length / 12));
+      months.forEach((month, index) => {
+        if (index % labelEvery !== 0 && index !== months.length - 1) return;
+
+        const xx =
+          margins.left +
+          (months.length === 1 ? plotW / 2 : (index / (months.length - 1)) * plotW);
+
+        npsChart.appendChild(svgEl("text", {
+          x: xx,
+          y: height - 30,
+          "text-anchor": "end",
+          transform: `rotate(-35 ${xx} ${height - 30})`,
+          class: "axis-label"
+        }, monthLabel(month)));
+      });
+
+      if (selectedAttraction === "Ambos" || selectedAttraction === "Cristo") {
+        const values = aggregateMonthlyNps(items, "Cristo", months);
+        drawNpsLine(
+          values,
+          months,
+          "line-cristo",
+          "point-cristo",
+          "Cristo Redentor",
+          width,
+          height,
+          margins
+        );
+      }
+
+      if (selectedAttraction === "Ambos" || selectedAttraction === "Bondinho") {
+        const values = aggregateMonthlyNps(items, "Bondinho", months);
+        drawNpsLine(
+          values,
+          months,
+          "line-bondinho",
+          "point-bondinho",
+          "Bondinho",
+          width,
+          height,
+          margins
+        );
+      }
+    }
+
     function renderGeneralComparisonChart(svg, legendElement, selectedAttraction, selectedSource, metric) {
       svg.innerHTML = "";
       legendElement.innerHTML = "";
@@ -1025,6 +1247,7 @@
       totalReviews.textContent = filtered.length.toLocaleString("pt-BR");
       selectedSourceLabel.textContent = selectedSource === "Todas" ? "Todas" : selectedSource;
 
+      renderMonthlyNpsChart(filtered, selected, selectedYears);
       renderGeneralComparisonChart(averageChart, averageLegend, selected, selectedSource, "average");
       renderScoreChart(filtered, selected);
 

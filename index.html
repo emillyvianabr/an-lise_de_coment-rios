@@ -893,7 +893,112 @@
       });
     }
 
-    function render() {
+    function renderMonthlyChart() {
+      try {
+        const selected = filter.value;
+        const selectedSource = sourceFilter.value;
+        const selectedYears = checkedValues(yearOptions);
+        const selectedMonths = checkedValues(monthOptions);
+
+        const filtered = reviews.filter(item => {
+          const referenceDate = item.dataReferencia || item.dataVisitacao || item.dataPublicacao;
+          if (!referenceDate) return false;
+
+          const attractionMatch = selected === "Ambos" || item.atracao === selected;
+          const sourceMatch = selectedSource === "Todas" || normalizeSource(item.fonte) === selectedSource;
+          const year = Number(referenceDate.slice(0, 4));
+          const month = Number(referenceDate.slice(5, 7));
+          const yearMatch = selectedYears.length === 0 || selectedYears.includes(year);
+          const monthMatch = selectedMonths.length === 0 || selectedMonths.includes(month);
+
+          return attractionMatch && sourceMatch && yearMatch && monthMatch;
+        }).map(item => ({
+          ...item,
+          dataReferencia: item.dataReferencia || item.dataVisitacao || item.dataPublicacao
+        }));
+
+        const months = getMonthRange(selectedYears);
+        const cristo = aggregate(filtered, "Cristo", months);
+        const bondinho = aggregate(filtered, "Bondinho", months);
+        const combined = months.map((_, index) => cristo[index] + bondinho[index]);
+
+        const peakIndex = combined.length ? combined.indexOf(Math.max(...combined)) : -1;
+        peakMonth.textContent = peakIndex >= 0 ? monthLabel(months[peakIndex]) : "—";
+        peakValue.textContent = peakIndex >= 0 ? combined[peakIndex].toLocaleString("pt-BR") : "0";
+
+        legend.innerHTML = "";
+        if (selected === "Ambos" || selected === "Cristo") {
+          legend.innerHTML += '<span class="legend-item"><i class="dot" style="background:var(--cristo)"></i>Cristo Redentor</span>';
+        }
+        if (selected === "Ambos" || selected === "Bondinho") {
+          legend.innerHTML += '<span class="legend-item"><i class="dot" style="background:var(--bondinho)"></i>Bondinho</span>';
+        }
+
+        chart.innerHTML = "";
+        const width = 1000;
+        const height = 400;
+        const margins = { top: 20, right: 30, bottom: 65, left: 60 };
+        const plotH = height - margins.top - margins.bottom;
+        const plotW = width - margins.left - margins.right;
+
+        const visibleSeries = [];
+        if (selected === "Ambos" || selected === "Cristo") visibleSeries.push(cristo);
+        if (selected === "Ambos" || selected === "Bondinho") visibleSeries.push(bondinho);
+
+        const maxRaw = Math.max(1, ...visibleSeries.flat());
+        const step = Math.max(1, Math.ceil(maxRaw / 5));
+        const maxY = Math.ceil(maxRaw / step) * step;
+
+        for (let index = 0; index <= 5; index++) {
+          const value = Math.round((maxY / 5) * index);
+          const y = margins.top + plotH - (index / 5) * plotH;
+          chart.appendChild(svgEl("line", {
+            x1: margins.left, y1: y,
+            x2: width - margins.right, y2: y,
+            class: "grid-line"
+          }));
+          chart.appendChild(svgEl("text", {
+            x: margins.left - 12, y: y + 4,
+            "text-anchor": "end", class: "axis-label"
+          }, String(value)));
+        }
+
+        const labelEvery = Math.max(1, Math.ceil(months.length / 12));
+        months.forEach((monthKeyValue, index) => {
+          if (index % labelEvery !== 0 && index !== months.length - 1) return;
+          const x = margins.left + (months.length === 1
+            ? plotW / 2
+            : (index / (months.length - 1)) * plotW);
+          chart.appendChild(svgEl("text", {
+            x, y: height - 27,
+            "text-anchor": "end",
+            transform: `rotate(-35 ${x} ${height - 27})`,
+            class: "axis-label"
+          }, monthLabel(monthKeyValue)));
+        });
+
+        if (selected === "Ambos" || selected === "Cristo") {
+          drawLine(cristo, months, "line-cristo", "point-cristo", width, height, margins, maxY);
+        }
+        if (selected === "Ambos" || selected === "Bondinho") {
+          drawLine(bondinho, months, "line-bondinho", "point-bondinho", width, height, margins, maxY);
+        }
+
+        if (!filtered.length) {
+          chart.appendChild(svgEl("text", {
+            x: 500, y: 190, "text-anchor": "middle", class: "axis-label"
+          }, "Sem avaliações para os filtros selecionados"));
+        }
+      } catch (error) {
+        console.error("Erro no gráfico mensal:", error);
+        chart.innerHTML = "";
+        chart.appendChild(svgEl("text", {
+          x: 500, y: 190, "text-anchor": "middle", class: "axis-label"
+        }, `Erro no gráfico mensal: ${error.message}`));
+      }
+    }
+
+    function renderDashboardCore() {
       const selected = filter.value;
       const selectedSource = sourceFilter.value;
       const selectedYears = checkedValues(yearOptions);
@@ -927,65 +1032,15 @@
       renderGeneralComparisonChart(averageChart, averageLegend, selected, selectedSource, "average");
       renderScoreChart(filtered, selected);
 
-      const months = getMonthRange(selectedYears);
-      const cristo = aggregate(filtered, "Cristo", months);
-      const bondinho = aggregate(filtered, "Bondinho", months);
-      const combined = months.map((_, i) => cristo[i] + bondinho[i]);
 
-      const peakIndex = combined.length ? combined.indexOf(Math.max(...combined)) : -1;
-      peakMonth.textContent = peakIndex >= 0 ? monthLabel(months[peakIndex]) : "—";
-      peakValue.textContent = peakIndex >= 0 ? combined[peakIndex].toLocaleString("pt-BR") : "0";
+    }
 
-      legend.innerHTML = "";
-      if (selected === "Ambos" || selected === "Cristo") {
-        legend.innerHTML += '<span class="legend-item"><i class="dot" style="background:var(--cristo)"></i>Cristo Redentor</span>';
-      }
-      if (selected === "Ambos" || selected === "Bondinho") {
-        legend.innerHTML += '<span class="legend-item"><i class="dot" style="background:var(--bondinho)"></i>Bondinho</span>';
-      }
-
-      chart.innerHTML = "";
-      if (!months.length) {
-        chart.appendChild(svgEl("text", { x: 500, y: 200, "text-anchor": "middle", class: "axis-label" }, "Sem dados para o filtro selecionado"));
-        return;
-      }
-
-      const width = 1000, height = 400;
-      const margins = { top: 20, right: 30, bottom: 65, left: 60 };
-      const visibleSeries = [];
-      if (selected === "Ambos" || selected === "Cristo") visibleSeries.push(cristo);
-      if (selected === "Ambos" || selected === "Bondinho") visibleSeries.push(bondinho);
-      const maxRaw = Math.max(1, ...visibleSeries.flat());
-      const step = Math.max(1, Math.ceil(maxRaw / 5));
-      const maxY = Math.ceil(maxRaw / step) * step;
-      const plotH = height - margins.top - margins.bottom;
-      const plotW = width - margins.left - margins.right;
-
-      for (let i = 0; i <= 5; i++) {
-        const value = Math.round((maxY / 5) * i);
-        const yy = margins.top + plotH - (i / 5) * plotH;
-        chart.appendChild(svgEl("line", { x1: margins.left, y1: yy, x2: width - margins.right, y2: yy, class: "grid-line" }));
-        chart.appendChild(svgEl("text", { x: margins.left - 12, y: yy + 4, "text-anchor": "end", class: "axis-label" }, String(value)));
-      }
-
-      const labelEvery = Math.max(1, Math.ceil(months.length / 12));
-      months.forEach((m, i) => {
-        if (i % labelEvery !== 0 && i !== months.length - 1) return;
-        const xx = margins.left + (months.length === 1 ? plotW / 2 : (i / (months.length - 1)) * plotW);
-        const label = svgEl("text", {
-          x: xx, y: height - 27,
-          "text-anchor": "end",
-          transform: `rotate(-35 ${xx} ${height - 27})`,
-          class: "axis-label"
-        }, monthLabel(m));
-        chart.appendChild(label);
-      });
-
-      if (selected === "Ambos" || selected === "Cristo") {
-        drawLine(cristo, months, "line-cristo", "point-cristo", width, height, margins, maxY);
-      }
-      if (selected === "Ambos" || selected === "Bondinho") {
-        drawLine(bondinho, months, "line-bondinho", "point-bondinho", width, height, margins, maxY);
+    function render() {
+      renderMonthlyChart();
+      try {
+        renderDashboardCore();
+      } catch (error) {
+        console.error("Erro nos gráficos complementares:", error);
       }
     }
 

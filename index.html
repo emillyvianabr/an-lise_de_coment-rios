@@ -322,8 +322,6 @@
     const chart = document.getElementById("chart");
     const totalReviews = document.getElementById("totalReviews");
     const selectedSourceLabel = document.getElementById("selectedSourceLabel");
-    const peakMonth = document.getElementById("peakMonth");
-    const peakValue = document.getElementById("peakValue");
     const legend = document.getElementById("legend");
     const scoreChart = document.getElementById("scoreChart");
     const averageChart = document.getElementById("averageChart");
@@ -923,8 +921,6 @@
         const combined = months.map((_, index) => cristo[index] + bondinho[index]);
 
         const peakIndex = combined.length ? combined.indexOf(Math.max(...combined)) : -1;
-        peakMonth.textContent = peakIndex >= 0 ? monthLabel(months[peakIndex]) : "—";
-        peakValue.textContent = peakIndex >= 0 ? combined[peakIndex].toLocaleString("pt-BR") : "0";
 
         legend.innerHTML = "";
         if (selected === "Ambos" || selected === "Cristo") {

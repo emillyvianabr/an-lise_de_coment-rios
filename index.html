@@ -109,14 +109,14 @@
     <header>
       <div>
         <h1>Dashboard de avaliações</h1>
-        <p class="subtitle">Evolução mensal da quantidade de comentários publicados.</p>
+        <p class="subtitle">Evolução mensal da quantidade de avaliações por mês de visitação.</p>
       </div>
       <div class="filter-box">
         <label for="attractionFilter">Visualizar atração</label>
         <select id="attractionFilter">
-          <option value="Ambos">Ambos</option>
+          <option value="Ambos">Cristo e Bondinho</option>
           <option value="Cristo">Cristo Redentor</option>
-          <option value="Bondinho">Bondinho do Pão de Açúcar</option>
+          <option value="Bondinho">Bondinho</option>
         </select>
       </div>
     </header>
@@ -144,7 +144,7 @@
       <div class="chart-wrap">
         <svg id="chart" viewBox="0 0 1000 400" role="img" aria-label="Gráfico de avaliações mensais"></svg>
       </div>
-      <p class="note">O gráfico utiliza a coluna “Data de publicação”. Meses sem avaliações aparecem com valor zero.</p>
+      <p class="note">O gráfico utiliza a coluna “Data de visitação”. Meses sem avaliações aparecem com valor zero.</p>
     </section>
   </main>
 
@@ -170,7 +170,7 @@
     }
 
     function getMonthRange(items) {
-      const months = items.map(x => monthKey(x.dataPublicacao)).filter(Boolean).sort();
+      const months = items.map(x => monthKey(x.dataVisitacao)).filter(Boolean).sort();
       if (!months.length) return [];
       const [sy, sm] = months[0].split("-").map(Number);
       const [ey, em] = months[months.length - 1].split("-").map(Number);
@@ -189,7 +189,7 @@
       items
         .filter(x => x.atracao === attraction)
         .forEach(x => {
-          const key = monthKey(x.dataPublicacao);
+          const key = monthKey(x.dataVisitacao);
           if (key && key in counts) counts[key]++;
         });
       return months.map(m => counts[m]);

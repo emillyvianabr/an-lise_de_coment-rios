@@ -223,7 +223,7 @@
     <header>
       <div>
         <h1>Dashboard de avaliações</h1>
-        <p class="subtitle">Evolução das avaliações de 2025 e 2026 por mês de visitação.</p>
+        <p class="subtitle">Evolução das avaliações de 2025 e 2026. Usa a data de visitação e, quando ela não existe, a data de publicação.</p>
         <p id="loadStatus" class="load-status">Carregando Comentários.xlsx…</p>
       </div>
       <div class="filters-grid">
@@ -524,9 +524,10 @@
 
     function availableYears() {
       return [2025, 2026].filter(year =>
-        reviews.some(item =>
-          item.dataVisitacao && Number(item.dataVisitacao.slice(0, 4)) === year
-        )
+        reviews.some(item => {
+          const referenceDate = item.dataVisitacao || item.dataPublicacao;
+          return referenceDate && Number(referenceDate.slice(0, 4)) === year;
+        })
       );
     }
 
@@ -616,18 +617,22 @@
       return dateString ? dateString.slice(0, 7) : null;
     }
 
-    function getMonthRange(items) {
-      const months = items.map(x => monthKey(x.dataVisitacao)).filter(Boolean).sort();
-      if (!months.length) return [];
-      const [sy, sm] = months[0].split("-").map(Number);
-      const [ey, em] = months[months.length - 1].split("-").map(Number);
+    function getMonthRange(items, selectedYears) {
+      const years = selectedYears.length
+        ? [...selectedYears].sort((a, b) => a - b)
+        : [...new Set(
+            items
+              .map(item => item.dataReferencia || item.dataVisitacao || item.dataPublicacao)
+              .filter(Boolean)
+              .map(date => Number(date.slice(0, 4)))
+          )].sort((a, b) => a - b);
+
       const result = [];
-      let y = sy, m = sm;
-      while (y < ey || (y === ey && m <= em)) {
-        result.push(`${y}-${String(m).padStart(2, "0")}`);
-        m++;
-        if (m === 13) { m = 1; y++; }
-      }
+      years.forEach(year => {
+        for (let month = 1; month <= 12; month++) {
+          result.push(`${year}-${String(month).padStart(2, "0")}`);
+        }
+      });
       return result;
     }
 
@@ -636,7 +641,7 @@
       items
         .filter(x => x.atracao === attraction)
         .forEach(x => {
-          const key = monthKey(x.dataVisitacao);
+          const key = monthKey(x.dataReferencia || x.dataVisitacao || x.dataPublicacao);
           if (key && key in counts) counts[key]++;
         });
       return months.map(m => counts[m]);
@@ -894,16 +899,20 @@
         : attractionFiltered.filter(item => normalizeSource(item.fonte) === selectedSource);
 
       const filtered = sourceFiltered.filter(item => {
-        if (!item.dataVisitacao) return false;
+        const referenceDate = item.dataVisitacao || item.dataPublicacao;
+        if (!referenceDate) return false;
 
-        const year = Number(item.dataVisitacao.slice(0, 4));
-        const month = Number(item.dataVisitacao.slice(5, 7));
+        const year = Number(referenceDate.slice(0, 4));
+        const month = Number(referenceDate.slice(5, 7));
 
         const yearMatch = selectedYears.length === 0 || selectedYears.includes(year);
         const monthMatch = selectedMonths.length === 0 || selectedMonths.includes(month);
 
         return yearMatch && monthMatch;
-      });
+      }).map(item => ({
+        ...item,
+        dataReferencia: item.dataVisitacao || item.dataPublicacao
+      }));
 
       totalReviews.textContent = filtered.length.toLocaleString("pt-BR");
       selectedSourceLabel.textContent = selectedSource === "Todas" ? "Todas" : selectedSource;
@@ -911,7 +920,7 @@
       renderGeneralComparisonChart(averageChart, averageLegend, selected, selectedSource, "average");
       renderScoreChart(filtered, selected);
 
-      const months = getMonthRange(filtered);
+      const months = getMonthRange(filtered, selectedYears);
       const cristo = aggregate(filtered, "Cristo", months);
       const bondinho = aggregate(filtered, "Bondinho", months);
       const combined = months.map((_, i) => cristo[i] + bondinho[i]);

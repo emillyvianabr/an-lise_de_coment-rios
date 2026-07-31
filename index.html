@@ -11,8 +11,8 @@
       --text: #172033;
       --muted: #687386;
       --border: #dfe5ef;
-      --cristo: #eb4a74;
-      --bondinho: #3cbab6;
+      --cristo: #1f5b3a;
+      --bondinho: #f28c28;
       --shadow: 0 10px 30px rgba(23,32,51,.08);
     }
     * { box-sizing: border-box; }
@@ -45,7 +45,7 @@
     .load-status.success { color: #247a52; }
     .filters-grid {
       display: grid;
-      grid-template-columns: minmax(210px, 1fr) minmax(220px, 1.1fr) minmax(300px, 1.6fr);
+      grid-template-columns: repeat(4, minmax(180px, 1fr));
       gap: 14px;
       width: min(100%, 860px);
       align-items: start;
@@ -142,7 +142,7 @@
     }
     .metrics {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 16px;
       margin-bottom: 20px;
     }
@@ -155,6 +155,7 @@
     .metric { padding: 20px; }
     .metric span { color: var(--muted); font-size: 14px; }
     .metric strong { display: block; font-size: 30px; margin-top: 7px; }
+    .metric strong.metric-text { font-size: 18px; line-height: 1.3; }
     .panel { padding: 22px; }
     .panel-head {
       display: flex;
@@ -203,8 +204,12 @@
       box-shadow: 0 8px 24px rgba(0,0,0,.18);
     }
     .chart-tooltip strong { display: block; margin-bottom: 2px; }
-    @media (max-width: 900px) {
-      .filters-grid { grid-template-columns: 1fr; width: 100%; }
+    @media (max-width: 1050px) {
+      .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .filters-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+    }
+    @media (max-width: 700px) {
+      .filters-grid { grid-template-columns: 1fr; }
     }
     @media (max-width: 720px) {
       .metrics { grid-template-columns: 1fr; }
@@ -218,7 +223,7 @@
     <header>
       <div>
         <h1>Dashboard de avaliações</h1>
-        <p class="subtitle">Evolução mensal da quantidade de avaliações por mês de visitação.</p>
+        <p class="subtitle">Evolução das avaliações de 2025 e 2026 por mês de visitação.</p>
         <p id="loadStatus" class="load-status">Carregando Comentários.xlsx…</p>
       </div>
       <div class="filters-grid">
@@ -228,6 +233,13 @@
             <option value="Ambos">Cristo e Bondinho</option>
             <option value="Cristo">Cristo Redentor</option>
             <option value="Bondinho">Bondinho</option>
+          </select>
+        </div>
+
+        <div class="filter-box">
+          <label for="sourceFilter">Fonte dos dados</label>
+          <select id="sourceFilter">
+            <option value="Todas">Todas as fontes</option>
           </select>
         </div>
 
@@ -253,18 +265,14 @@
       </div>
     </header>
 
-    <section class="metrics">
+    <section class="metrics metrics-two">
       <div class="metric">
-        <span>Total de avaliações</span>
+        <span>Avaliações individuais no filtro</span>
         <strong id="totalReviews">0</strong>
       </div>
       <div class="metric">
-        <span>Mês com mais avaliações</span>
-        <strong id="peakMonth">—</strong>
-      </div>
-      <div class="metric">
-        <span>Quantidade no pico</span>
-        <strong id="peakValue">0</strong>
+        <span>Fonte selecionada</span>
+        <strong id="selectedSourceLabel" class="metric-text">Todas</strong>
       </div>
     </section>
 
@@ -277,6 +285,17 @@
         <svg id="chart" viewBox="0 0 1000 400" role="img" aria-label="Gráfico de avaliações mensais"></svg>
       </div>
       <p class="note">O gráfico utiliza a coluna “Data de visitação”. Você pode selecionar vários anos e meses. Sem nenhuma opção marcada, o filtro considera todos os valores disponíveis.</p>
+    </section>
+
+    <section class="panel score-panel">
+      <div class="panel-head">
+        <h2>Nota média por atração e fonte</h2>
+        <div class="legend" id="averageLegend"></div>
+      </div>
+      <div class="chart-wrap">
+        <svg id="averageChart" viewBox="0 0 1000 420" role="img" aria-label="Gráfico comparativo de nota média por atração e fonte"></svg>
+      </div>
+      <p class="note">Notas médias informadas na aba Geral. Este gráfico responde aos filtros de atração e fonte.</p>
     </section>
 
     <section class="panel score-panel">
@@ -296,14 +315,19 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script>
     let reviews = [];
+    let generalData = [];
 
     const filter = document.getElementById("attractionFilter");
+    const sourceFilter = document.getElementById("sourceFilter");
     const chart = document.getElementById("chart");
     const totalReviews = document.getElementById("totalReviews");
+    const selectedSourceLabel = document.getElementById("selectedSourceLabel");
     const peakMonth = document.getElementById("peakMonth");
     const peakValue = document.getElementById("peakValue");
     const legend = document.getElementById("legend");
     const scoreChart = document.getElementById("scoreChart");
+    const averageChart = document.getElementById("averageChart");
+    const averageLegend = document.getElementById("averageLegend");
     const scoreLegend = document.getElementById("scoreLegend");
     const tooltip = document.getElementById("tooltip");
     const loadStatus = document.getElementById("loadStatus");
@@ -358,6 +382,53 @@
       return String(value);
     }
 
+    function normalizeSource(value) {
+      const text = normalizeText(value, "TripAdvisor").trim();
+      const simplified = text.toLowerCase().replace(/\s+/g, "");
+
+      if (simplified === "tripadvisor") return "TripAdvisor";
+      if (simplified === "getyourguide") return "Get Your Guide";
+      if (simplified === "viator") return "Viator";
+      return text;
+    }
+
+    function normalizeNumber(value) {
+      if (value === null || value === undefined || value === "") return null;
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+
+      const cleaned = String(value)
+        .replace(/\u00a0/g, "")
+        .replace(/\s/g, "")
+        .replace(",", ".")
+        .replace(/[^\d.-]/g, "");
+
+      if (!cleaned) return null;
+      const number = Number(cleaned);
+      return Number.isFinite(number) ? number : null;
+    }
+
+    function sheetToGeneralData(workbook) {
+      const worksheet = workbook.Sheets["Geral"];
+      if (!worksheet) {
+        throw new Error('A aba "Geral" não foi encontrada.');
+      }
+
+      const rows = XLSX.utils.sheet_to_json(worksheet, {
+        defval: "",
+        raw: true
+      });
+
+      return rows
+        .filter(row => row["Site"])
+        .map(row => ({
+          fonte: normalizeSource(row["Site"]),
+          mediaBondinho: normalizeNumber(row["Nota Média Bondinho do Pão de Açúcar"]),
+          mediaCristo: normalizeNumber(row["Nota média Cristo Redentor"]),
+          volumeBondinho: normalizeNumber(row["Volume de respostas Bondinho do Pão de Açúcar"]),
+          volumeCristo: normalizeNumber(row["Volume de respostas Cristo Redentor"])
+        }));
+    }
+
     function sheetToReviews(workbook, sheetName, attraction) {
       const worksheet = workbook.Sheets[sheetName];
       if (!worksheet) {
@@ -377,7 +448,8 @@
           dataVisitacao: excelSerialToIso(row["Data de visitação"] || row["Data de viagem"]),
           comentario: normalizeText(row["Comentário"]),
           companhia: normalizeText(row["Companhia"], "Não informado"),
-          pontuacao: row["Pontuação"] === "" ? null : Number(row["Pontuação"])
+          fonte: normalizeSource(row["Fonte"] || "TripAdvisor"),
+          pontuacao: normalizeNumber(row["Pontuação"])
         }));
     }
 
@@ -401,23 +473,61 @@
           ...sheetToReviews(workbook, "Bondinho", "Bondinho"),
           ...sheetToReviews(workbook, "Cristo redentor", "Cristo")
         ];
+        generalData = sheetToGeneralData(workbook);
 
-        loadStatus.textContent = `${reviews.length.toLocaleString("pt-BR")} avaliações carregadas da planilha.`;
+        loadStatus.textContent = `${reviews.length.toLocaleString("pt-BR")} avaliações individuais e ${generalData.length} fontes consolidadas carregadas.`;
         loadStatus.className = "load-status success";
       } catch (error) {
         console.error(error);
         loadStatus.textContent = `Erro ao carregar a planilha: ${error.message}`;
         loadStatus.className = "load-status error";
         reviews = [];
+        generalData = [];
       }
     }
 
+    function availableSources() {
+      return [...new Set([
+        ...reviews.map(item => normalizeSource(item.fonte)),
+        ...generalData.map(item => normalizeSource(item.fonte))
+      ])].sort((a, b) => a.localeCompare(b, "pt-BR"));
+    }
+
+    function initializeSourceFilter() {
+      sourceFilter.innerHTML = '<option value="Todas">Todas as fontes</option>';
+      availableSources().forEach(source => {
+        const option = document.createElement("option");
+        option.value = source;
+        option.textContent = source;
+        sourceFilter.appendChild(option);
+      });
+    }
+
+    function validScores(items) {
+      return items
+        .map(item => Number(item.pontuacao))
+        .filter(score => Number.isFinite(score) && score >= 1 && score <= 5);
+    }
+
+    function averageScore(items) {
+      const scores = validScores(items);
+      if (!scores.length) return null;
+      return scores.reduce((sum, score) => sum + score, 0) / scores.length;
+    }
+
+    function formatAverage(value) {
+      return value === null ? "—" : value.toLocaleString("pt-BR", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+    }
+
     function availableYears() {
-      return [...new Set(
-        reviews
-          .map(x => x.dataVisitacao ? Number(x.dataVisitacao.slice(0, 4)) : null)
-          .filter(Boolean)
-      )].sort((a, b) => a - b);
+      return [2025, 2026].filter(year =>
+        reviews.some(item =>
+          item.dataVisitacao && Number(item.dataVisitacao.slice(0, 4)) === year
+        )
+      );
     }
 
     function createCheckbox(container, value, label, checked, groupName) {
@@ -559,6 +669,112 @@
       });
     }
 
+    function renderGeneralComparisonChart(svg, legendElement, selectedAttraction, selectedSource, metric) {
+      svg.innerHTML = "";
+      legendElement.innerHTML = "";
+
+      const attractions = [];
+      if (selectedAttraction === "Ambos" || selectedAttraction === "Cristo") attractions.push("Cristo");
+      if (selectedAttraction === "Ambos" || selectedAttraction === "Bondinho") attractions.push("Bondinho");
+
+      if (attractions.includes("Cristo")) {
+        legendElement.innerHTML += '<span class="legend-item"><i class="dot" style="background:var(--cristo)"></i>Cristo Redentor</span>';
+      }
+      if (attractions.includes("Bondinho")) {
+        legendElement.innerHTML += '<span class="legend-item"><i class="dot" style="background:var(--bondinho)"></i>Bondinho</span>';
+      }
+
+      const displayedData = generalData
+        .filter(item => selectedSource === "Todas" || item.fonte === selectedSource)
+        .sort((a, b) => a.fonte.localeCompare(b.fonte, "pt-BR"));
+
+      if (!displayedData.length) {
+        svg.appendChild(svgEl("text", {
+          x: 500, y: 210, "text-anchor": "middle", class: "axis-label"
+        }, "Sem dados consolidados para os filtros selecionados"));
+        return;
+      }
+
+      const getValue = (item, attraction) => {
+        if (metric === "average") {
+          return attraction === "Cristo" ? item.mediaCristo : item.mediaBondinho;
+        }
+        return attraction === "Cristo" ? item.volumeCristo : item.volumeBondinho;
+      };
+
+      const values = displayedData.flatMap(item =>
+        attractions.map(attraction => getValue(item, attraction))
+      ).filter(value => value !== null && Number.isFinite(value));
+
+      const maxY = metric === "average" ? 5 : Math.max(1, ...values);
+      const width = 1000;
+      const height = 420;
+      const margins = { top: 25, right: 30, bottom: 85, left: 75 };
+      const plotW = width - margins.left - margins.right;
+      const plotH = height - margins.top - margins.bottom;
+
+      for (let i = 0; i <= 5; i++) {
+        const value = metric === "average"
+          ? i
+          : Math.round((maxY / 5) * i);
+        const yy = margins.top + plotH - (i / 5) * plotH;
+
+        svg.appendChild(svgEl("line", {
+          x1: margins.left, y1: yy,
+          x2: width - margins.right, y2: yy,
+          class: "grid-line"
+        }));
+        svg.appendChild(svgEl("text", {
+          x: margins.left - 12, y: yy + 4,
+          "text-anchor": "end", class: "axis-label"
+        }, metric === "average"
+          ? value.toFixed(1).replace(".", ",")
+          : value.toLocaleString("pt-BR")
+        ));
+      }
+
+      const groupWidth = plotW / displayedData.length;
+      const barAreaWidth = Math.min(160, groupWidth * 0.72);
+      const gap = attractions.length === 2 ? 10 : 0;
+      const barWidth = attractions.length === 2
+        ? (barAreaWidth - gap) / 2
+        : barAreaWidth * 0.62;
+
+      displayedData.forEach((item, sourceIndex) => {
+        const centerX = margins.left + groupWidth * sourceIndex + groupWidth / 2;
+
+        svg.appendChild(svgEl("text", {
+          x: centerX, y: height - 47,
+          "text-anchor": "middle", class: "axis-label"
+        }, item.fonte));
+
+        attractions.forEach((attraction, attractionIndex) => {
+          const rawValue = getValue(item, attraction);
+          const value = rawValue === null ? 0 : rawValue;
+          const barHeight = (value / maxY) * plotH;
+          const totalWidth = attractions.length === 2 ? barWidth * 2 + gap : barWidth;
+          const x = centerX - totalWidth / 2 + attractionIndex * (barWidth + gap);
+          const y = margins.top + plotH - barHeight;
+
+          const rect = svgEl("rect", {
+            x, y,
+            width: barWidth,
+            height: Math.max(barHeight, rawValue === null ? 0 : 1),
+            rx: 5,
+            class: attraction === "Cristo" ? "bar-cristo" : "bar-bondinho"
+          });
+
+          const attractionName = attraction === "Cristo" ? "Cristo Redentor" : "Bondinho";
+          const displayValue = metric === "average"
+            ? (rawValue === null ? "Sem nota" : `Nota média ${formatAverage(rawValue)}`)
+            : (rawValue === null ? "Sem volume" : `${Math.round(rawValue).toLocaleString("pt-BR")} avaliações`);
+
+          attachTooltip(rect, attractionName, [item.fonte, displayValue]);
+          svg.appendChild(rect);
+        });
+      });
+    }
+
     function renderScoreChart(filtered, selected) {
       scoreChart.innerHTML = "";
       scoreLegend.innerHTML = "";
@@ -665,6 +881,7 @@
 
     function render() {
       const selected = filter.value;
+      const selectedSource = sourceFilter.value;
       const selectedYears = checkedValues(yearOptions);
       const selectedMonths = checkedValues(monthOptions);
 
@@ -672,7 +889,11 @@
         ? reviews
         : reviews.filter(x => x.atracao === selected);
 
-      const filtered = attractionFiltered.filter(item => {
+      const sourceFiltered = selectedSource === "Todas"
+        ? attractionFiltered
+        : attractionFiltered.filter(item => normalizeSource(item.fonte) === selectedSource);
+
+      const filtered = sourceFiltered.filter(item => {
         if (!item.dataVisitacao) return false;
 
         const year = Number(item.dataVisitacao.slice(0, 4));
@@ -685,6 +906,9 @@
       });
 
       totalReviews.textContent = filtered.length.toLocaleString("pt-BR");
+      selectedSourceLabel.textContent = selectedSource === "Todas" ? "Todas" : selectedSource;
+
+      renderGeneralComparisonChart(averageChart, averageLegend, selected, selectedSource, "average");
       renderScoreChart(filtered, selected);
 
       const months = getMonthRange(filtered);
@@ -750,6 +974,7 @@
     }
 
     filter.addEventListener("change", render);
+    sourceFilter.addEventListener("change", render);
     yearOptions.addEventListener("change", render);
     monthOptions.addEventListener("change", render);
 
@@ -758,6 +983,7 @@
 
     async function startDashboard() {
       await loadWorkbookData();
+      initializeSourceFilter();
       initializeFilters();
       render();
     }

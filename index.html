@@ -223,7 +223,7 @@
     <header>
       <div>
         <h1>Dashboard de avaliações</h1>
-        <p class="subtitle">Evolução das avaliações de 2025 e 2026. Usa a data de visitação e, quando ela não existe, a data de publicação.</p>
+        <p class="subtitle">Evolução mensal das avaliações de 2025 e 2026.</p>
         <p id="loadStatus" class="load-status">Carregando Comentários.xlsx…</p>
       </div>
       <div class="filters-grid">
@@ -441,16 +441,29 @@
       });
 
       return rows
-        .filter(row => row["Data de publicação"] || row["Data de visitação"] || row["Comentário"])
-        .map(row => ({
-          atracao: attraction,
-          dataPublicacao: excelSerialToIso(row["Data de publicação"]),
-          dataVisitacao: excelSerialToIso(row["Data de visitação"] || row["Data de viagem"]),
-          comentario: normalizeText(row["Comentário"]),
-          companhia: normalizeText(row["Companhia"], "Não informado"),
-          fonte: normalizeSource(row["Fonte"] || "TripAdvisor"),
-          pontuacao: normalizeNumber(row["Pontuação"])
-        }));
+        .filter(row =>
+          row["Data de publicação"] ||
+          row["Data de visitação"] ||
+          row["Comentário"]
+        )
+        .map(row => {
+          const dataPublicacao = excelSerialToIso(row["Data de publicação"]);
+          const dataVisitacao = excelSerialToIso(
+            row["Data de visitação"] || row["Data de viagem"]
+          );
+
+          return {
+            atracao: attraction,
+            fonte: normalizeSource(row["Fonte"] || "TripAdvisor"),
+            dataPublicacao,
+            dataVisitacao,
+            dataReferencia: dataVisitacao || dataPublicacao,
+            comentario: normalizeText(row["Comentário"]),
+            companhia: normalizeText(row["Companhia"], "Não informado"),
+            pontuacao: normalizeNumber(row["Pontuação"])
+          };
+        })
+        .filter(item => item.dataReferencia);
     }
 
     async function loadWorkbookData() {
@@ -475,7 +488,9 @@
         ];
         generalData = sheetToGeneralData(workbook);
 
-        loadStatus.textContent = `${reviews.length.toLocaleString("pt-BR")} avaliações individuais e ${generalData.length} fontes consolidadas carregadas.`;
+        const count2025 = reviews.filter(item => item.dataReferencia?.startsWith("2025")).length;
+        const count2026 = reviews.filter(item => item.dataReferencia?.startsWith("2026")).length;
+        loadStatus.textContent = `${reviews.length.toLocaleString("pt-BR")} avaliações carregadas — ${count2025.toLocaleString("pt-BR")} de 2025 e ${count2026.toLocaleString("pt-BR")} de 2026.`;
         loadStatus.className = "load-status success";
       } catch (error) {
         console.error(error);
@@ -523,12 +538,7 @@
     }
 
     function availableYears() {
-      return [2025, 2026].filter(year =>
-        reviews.some(item => {
-          const referenceDate = item.dataVisitacao || item.dataPublicacao;
-          return referenceDate && Number(referenceDate.slice(0, 4)) === year;
-        })
-      );
+      return [2025, 2026];
     }
 
     function createCheckbox(container, value, label, checked, groupName) {
@@ -617,34 +627,33 @@
       return dateString ? dateString.slice(0, 7) : null;
     }
 
-    function getMonthRange(items, selectedYears) {
+    function getMonthRange(selectedYears) {
       const years = selectedYears.length
         ? [...selectedYears].sort((a, b) => a - b)
-        : [...new Set(
-            items
-              .map(item => item.dataReferencia || item.dataVisitacao || item.dataPublicacao)
-              .filter(Boolean)
-              .map(date => Number(date.slice(0, 4)))
-          )].sort((a, b) => a - b);
+        : [2025, 2026];
 
-      const result = [];
+      const months = [];
       years.forEach(year => {
         for (let month = 1; month <= 12; month++) {
-          result.push(`${year}-${String(month).padStart(2, "0")}`);
+          months.push(`${year}-${String(month).padStart(2, "0")}`);
         }
       });
-      return result;
+      return months;
     }
 
     function aggregate(items, attraction, months) {
-      const counts = Object.fromEntries(months.map(m => [m, 0]));
+      const counts = Object.fromEntries(months.map(month => [month, 0]));
+
       items
-        .filter(x => x.atracao === attraction)
-        .forEach(x => {
-          const key = monthKey(x.dataReferencia || x.dataVisitacao || x.dataPublicacao);
-          if (key && key in counts) counts[key]++;
+        .filter(item => item.atracao === attraction)
+        .forEach(item => {
+          const key = monthKey(item.dataReferencia);
+          if (key && Object.prototype.hasOwnProperty.call(counts, key)) {
+            counts[key] += 1;
+          }
         });
-      return months.map(m => counts[m]);
+
+      return months.map(month => counts[month]);
     }
 
     function svgEl(tag, attrs = {}, text = "") {
@@ -890,29 +899,27 @@
       const selectedYears = checkedValues(yearOptions);
       const selectedMonths = checkedValues(monthOptions);
 
-      const attractionFiltered = selected === "Ambos"
-        ? reviews
-        : reviews.filter(x => x.atracao === selected);
+      const filtered = reviews.filter(item => {
+        if (!item.dataReferencia) return false;
 
-      const sourceFiltered = selectedSource === "Todas"
-        ? attractionFiltered
-        : attractionFiltered.filter(item => normalizeSource(item.fonte) === selectedSource);
+        const attractionMatch =
+          selected === "Ambos" || item.atracao === selected;
 
-      const filtered = sourceFiltered.filter(item => {
-        const referenceDate = item.dataVisitacao || item.dataPublicacao;
-        if (!referenceDate) return false;
+        const sourceMatch =
+          selectedSource === "Todas" ||
+          normalizeSource(item.fonte) === selectedSource;
 
-        const year = Number(referenceDate.slice(0, 4));
-        const month = Number(referenceDate.slice(5, 7));
+        const year = Number(item.dataReferencia.slice(0, 4));
+        const month = Number(item.dataReferencia.slice(5, 7));
 
-        const yearMatch = selectedYears.length === 0 || selectedYears.includes(year);
-        const monthMatch = selectedMonths.length === 0 || selectedMonths.includes(month);
+        const yearMatch =
+          selectedYears.length === 0 || selectedYears.includes(year);
 
-        return yearMatch && monthMatch;
-      }).map(item => ({
-        ...item,
-        dataReferencia: item.dataVisitacao || item.dataPublicacao
-      }));
+        const monthMatch =
+          selectedMonths.length === 0 || selectedMonths.includes(month);
+
+        return attractionMatch && sourceMatch && yearMatch && monthMatch;
+      });
 
       totalReviews.textContent = filtered.length.toLocaleString("pt-BR");
       selectedSourceLabel.textContent = selectedSource === "Todas" ? "Todas" : selectedSource;
@@ -920,7 +927,7 @@
       renderGeneralComparisonChart(averageChart, averageLegend, selected, selectedSource, "average");
       renderScoreChart(filtered, selected);
 
-      const months = getMonthRange(filtered, selectedYears);
+      const months = getMonthRange(selectedYears);
       const cristo = aggregate(filtered, "Cristo", months);
       const bondinho = aggregate(filtered, "Bondinho", months);
       const combined = months.map((_, i) => cristo[i] + bondinho[i]);
